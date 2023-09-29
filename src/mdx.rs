@@ -3,13 +3,13 @@ use std::collections::HashMap;
 use crate::markdown::parse;
 use html_parser::{Dom, Element};
 use leptos::{
-    component, html::ElementDescriptor, warn, Children, Fragment, HtmlElement, IntoView, View,
+    component, html::ElementDescriptor, warn, Children, Fragment, HtmlElement, IntoView, View, Scope,
 };
 
 #[component]
 /// Renders a markdown source into a Leptos component.
 /// Custom components can be used in the markdown source.
-pub fn Mdx(source: String, components: Components) -> impl IntoView {
+pub fn Mdx(cx: Scope, source: String, components: Components) -> impl IntoView {
     let (_fm, html) = parse(&source).expect("invalid mdx");
     // TODO: we could expose frontmatter in the context so components can use its value
 
@@ -18,7 +18,7 @@ pub fn Mdx(source: String, components: Components) -> impl IntoView {
     let mut root_views = vec![];
     for node in dom.children {
         if let Some(el) = node.element() {
-            root_views.push(process_element(el, &components));
+            root_views.push(process_element(cx, el, &components));
         }
     }
 
@@ -35,12 +35,14 @@ pub struct MdxComponentProps {
 
 /// A collection of custom components.
 pub struct Components {
+    cx: Scope,
     components: HashMap<String, Box<dyn Fn(MdxComponentProps) -> View>>,
 }
 
 impl Components {
-    pub fn new() -> Self {
+    pub fn new(cx: Scope) -> Self {
         Self {
+            cx: cx,
             components: HashMap::new(),
         }
     }
@@ -48,11 +50,12 @@ impl Components {
     /// Register a new custom component that won't receive any props.
     pub fn add<F, IV>(&mut self, name: String, component: F)
     where
-        F: Fn() -> IV + 'static,
+        F: Fn(Scope) -> IV + 'static,
         IV: IntoView + 'static,
     {
+        let context = self.cx;
         self.components
-            .insert(name, Box::new(move |_| component().into_view()));
+            .insert(name, Box::new(move |_| component(context).into_view(context)));
     }
 
     /// Register a new custom component that will receive props. The standardized
@@ -64,13 +67,14 @@ impl Components {
         component: F,
         props_adapter: PropsFn,
     ) where
-        F: Fn(Props) -> IV + 'static,
+        F: Fn(Scope, Props) -> IV + 'static,
         IV: IntoView + 'static,
         PropsFn: Fn(MdxComponentProps) -> Props + 'static,
     {
+        let context = self.cx;
         self.components.insert(
             name,
-            Box::new(move |props| component(props_adapter(props)).into_view()),
+            Box::new(move |props| component(context,props_adapter(props)).into_view(context)),
         );
     }
 
@@ -79,15 +83,15 @@ impl Components {
     }
 }
 
-pub fn process_element(el: &Element, components: &Components) -> View {
+pub fn process_element(cx: Scope, el: &Element, components: &Components) -> View {
     let mut child_views = vec![];
     for child in &el.children {
         match child {
             html_parser::Node::Element(el_child) => {
-                child_views.push(process_element(el_child, components));
+                child_views.push(process_element(cx, el_child, components));
             }
             html_parser::Node::Text(text) => {
-                child_views.push(text.clone().into_view());
+                child_views.push(text.clone().into_view(cx));
             }
             _ => {}
         }
@@ -99,136 +103,137 @@ pub fn process_element(el: &Element, components: &Components) -> View {
             id: el.id.clone(),
             classes: el.classes.clone(),
             attributes: el.attributes.clone(),
-            children: Box::new(move || Fragment::new(child_views)),
+            children: Box::new(move |_| Fragment::new(child_views)),
         });
         return cmp;
     }
 
     // HTML elements
     match el.name.as_str() {
-        "html" => html_element(el, child_views, leptos::html::html()),
-        "base" => html_element(el, child_views, leptos::html::base()),
-        "head" => html_element(el, child_views, leptos::html::head()),
-        "link" => html_element(el, child_views, leptos::html::link()),
-        "meta" => html_element(el, child_views, leptos::html::meta()),
-        "style" => html_element(el, child_views, leptos::html::style()),
-        "title" => html_element(el, child_views, leptos::html::title()),
-        "body" => html_element(el, child_views, leptos::html::body()),
-        "address" => html_element(el, child_views, leptos::html::address()),
-        "article" => html_element(el, child_views, leptos::html::article()),
-        "aside" => html_element(el, child_views, leptos::html::aside()),
-        "footer" => html_element(el, child_views, leptos::html::footer()),
-        "header" => html_element(el, child_views, leptos::html::header()),
-        "hgroup" => html_element(el, child_views, leptos::html::hgroup()),
-        "h1" => html_element(el, child_views, leptos::html::h1()),
-        "h2" => html_element(el, child_views, leptos::html::h2()),
-        "h3" => html_element(el, child_views, leptos::html::h3()),
-        "h4" => html_element(el, child_views, leptos::html::h4()),
-        "h5" => html_element(el, child_views, leptos::html::h5()),
-        "h6" => html_element(el, child_views, leptos::html::h6()),
-        "main" => html_element(el, child_views, leptos::html::main()),
-        "nav" => html_element(el, child_views, leptos::html::nav()),
-        "section" => html_element(el, child_views, leptos::html::section()),
-        "blockquote" => html_element(el, child_views, leptos::html::blockquote()),
-        "dd" => html_element(el, child_views, leptos::html::dd()),
-        "div" => html_element(el, child_views, leptos::html::div()),
-        "dl" => html_element(el, child_views, leptos::html::dl()),
-        "dt" => html_element(el, child_views, leptos::html::dt()),
-        "figcaption" => html_element(el, child_views, leptos::html::figcaption()),
-        "figure" => html_element(el, child_views, leptos::html::figure()),
-        "hr" => html_element(el, child_views, leptos::html::hr()),
-        "li" => html_element(el, child_views, leptos::html::li()),
-        "ol" => html_element(el, child_views, leptos::html::ol()),
-        "p" => html_element(el, child_views, leptos::html::p()),
-        "pre" => html_element(el, child_views, leptos::html::pre()),
-        "ul" => html_element(el, child_views, leptos::html::ul()),
-        "a" => html_element(el, child_views, leptos::html::a()),
-        "abbr" => html_element(el, child_views, leptos::html::abbr()),
-        "b" => html_element(el, child_views, leptos::html::b()),
-        "bdi" => html_element(el, child_views, leptos::html::bdi()),
-        "bdo" => html_element(el, child_views, leptos::html::bdo()),
-        "br" => html_element(el, child_views, leptos::html::br()),
-        "cite" => html_element(el, child_views, leptos::html::cite()),
-        "code" => html_element(el, child_views, leptos::html::code()),
-        "data" => html_element(el, child_views, leptos::html::data()),
-        "dfn" => html_element(el, child_views, leptos::html::dfn()),
-        "em" => html_element(el, child_views, leptos::html::em()),
-        "i" => html_element(el, child_views, leptos::html::i()),
-        "kbd" => html_element(el, child_views, leptos::html::kbd()),
-        "mark" => html_element(el, child_views, leptos::html::mark()),
-        "q" => html_element(el, child_views, leptos::html::q()),
-        "rp" => html_element(el, child_views, leptos::html::rp()),
-        "rt" => html_element(el, child_views, leptos::html::rt()),
-        "ruby" => html_element(el, child_views, leptos::html::ruby()),
-        "s" => html_element(el, child_views, leptos::html::s()),
-        "samp" => html_element(el, child_views, leptos::html::samp()),
-        "small" => html_element(el, child_views, leptos::html::small()),
-        "span" => html_element(el, child_views, leptos::html::span()),
-        "strong" => html_element(el, child_views, leptos::html::strong()),
-        "sub" => html_element(el, child_views, leptos::html::sub()),
-        "sup" => html_element(el, child_views, leptos::html::sup()),
-        "time" => html_element(el, child_views, leptos::html::time()),
-        "u" => html_element(el, child_views, leptos::html::u()),
-        "var" => html_element(el, child_views, leptos::html::var()),
-        "wbr" => html_element(el, child_views, leptos::html::wbr()),
-        "area" => html_element(el, child_views, leptos::html::area()),
-        "audio" => html_element(el, child_views, leptos::html::audio()),
-        "img" => html_element(el, child_views, leptos::html::img()),
-        "map" => html_element(el, child_views, leptos::html::map()),
-        "track" => html_element(el, child_views, leptos::html::track()),
-        "video" => html_element(el, child_views, leptos::html::video()),
-        "embed" => html_element(el, child_views, leptos::html::embed()),
-        "iframe" => html_element(el, child_views, leptos::html::iframe()),
-        "object" => html_element(el, child_views, leptos::html::object()),
-        "param" => html_element(el, child_views, leptos::html::param()),
-        "picture" => html_element(el, child_views, leptos::html::picture()),
-        "portal" => html_element(el, child_views, leptos::html::portal()),
-        "source" => html_element(el, child_views, leptos::html::source()),
-        "svg" => html_element(el, child_views, leptos::html::svg()),
-        "math" => html_element(el, child_views, leptos::html::math()),
-        "canvas" => html_element(el, child_views, leptos::html::canvas()),
-        "noscript" => html_element(el, child_views, leptos::html::noscript()),
-        "script" => html_element(el, child_views, leptos::html::script()),
-        "del" => html_element(el, child_views, leptos::html::del()),
-        "ins" => html_element(el, child_views, leptos::html::ins()),
-        "caption" => html_element(el, child_views, leptos::html::caption()),
-        "col" => html_element(el, child_views, leptos::html::col()),
-        "colgroup" => html_element(el, child_views, leptos::html::colgroup()),
-        "table" => html_element(el, child_views, leptos::html::table()),
-        "tbody" => html_element(el, child_views, leptos::html::tbody()),
-        "td" => html_element(el, child_views, leptos::html::td()),
-        "tfoot" => html_element(el, child_views, leptos::html::tfoot()),
-        "th" => html_element(el, child_views, leptos::html::th()),
-        "thead" => html_element(el, child_views, leptos::html::thead()),
-        "tr" => html_element(el, child_views, leptos::html::tr()),
-        "button" => html_element(el, child_views, leptos::html::button()),
-        "datalist" => html_element(el, child_views, leptos::html::datalist()),
-        "fieldset" => html_element(el, child_views, leptos::html::fieldset()),
-        "form" => html_element(el, child_views, leptos::html::form()),
-        "input" => html_element(el, child_views, leptos::html::input()),
-        "label" => html_element(el, child_views, leptos::html::label()),
-        "legend" => html_element(el, child_views, leptos::html::legend()),
-        "meter" => html_element(el, child_views, leptos::html::meter()),
-        "optgroup" => html_element(el, child_views, leptos::html::optgroup()),
-        "option" => html_element(el, child_views, leptos::html::option()),
-        "output" => html_element(el, child_views, leptos::html::output()),
-        "progress" => html_element(el, child_views, leptos::html::progress()),
-        "select" => html_element(el, child_views, leptos::html::select()),
-        "textarea" => html_element(el, child_views, leptos::html::textarea()),
-        "details" => html_element(el, child_views, leptos::html::details()),
-        "dialog" => html_element(el, child_views, leptos::html::dialog()),
-        "menu" => html_element(el, child_views, leptos::html::menu()),
-        "summary" => html_element(el, child_views, leptos::html::summary()),
-        "slot" => html_element(el, child_views, leptos::html::slot()),
-        "template" => html_element(el, child_views, leptos::html::template()),
+        "html" => html_element(cx, el, child_views, leptos::html::html(cx)),
+        "base" => html_element(cx, el, child_views, leptos::html::base(cx)),
+        "head" => html_element(cx, el, child_views, leptos::html::head(cx)),
+        "link" => html_element(cx, el, child_views, leptos::html::link(cx)),
+        "meta" => html_element(cx, el, child_views, leptos::html::meta(cx)),
+        "style" => html_element(cx, el, child_views, leptos::html::style(cx)),
+        "title" => html_element(cx, el, child_views, leptos::html::title(cx)),
+        "body" => html_element(cx, el, child_views, leptos::html::body(cx)),
+        "address" => html_element(cx, el, child_views, leptos::html::address(cx)),
+        "article" => html_element(cx, el, child_views, leptos::html::article(cx)),
+        "aside" => html_element(cx, el, child_views, leptos::html::aside(cx)),
+        "footer" => html_element(cx, el, child_views, leptos::html::footer(cx)),
+        "header" => html_element(cx, el, child_views, leptos::html::header(cx)),
+        "hgroup" => html_element(cx, el, child_views, leptos::html::hgroup(cx)),
+        "h1" => html_element(cx, el, child_views, leptos::html::h1(cx)),
+        "h2" => html_element(cx, el, child_views, leptos::html::h2(cx)),
+        "h3" => html_element(cx, el, child_views, leptos::html::h3(cx)),
+        "h4" => html_element(cx, el, child_views, leptos::html::h4(cx)),
+        "h5" => html_element(cx, el, child_views, leptos::html::h5(cx)),
+        "h6" => html_element(cx, el, child_views, leptos::html::h6(cx)),
+        "main" => html_element(cx, el, child_views, leptos::html::main(cx)),
+        "nav" => html_element(cx, el, child_views, leptos::html::nav(cx)),
+        "section" => html_element(cx, el, child_views, leptos::html::section(cx)),
+        "blockquote" => html_element(cx, el, child_views, leptos::html::blockquote(cx)),
+        "dd" => html_element(cx, el, child_views, leptos::html::dd(cx)),
+        "div" => html_element(cx, el, child_views, leptos::html::div(cx)),
+        "dl" => html_element(cx, el, child_views, leptos::html::dl(cx)),
+        "dt" => html_element(cx, el, child_views, leptos::html::dt(cx)),
+        "figcaption" => html_element(cx, el, child_views, leptos::html::figcaption(cx)),
+        "figure" => html_element(cx, el, child_views, leptos::html::figure(cx)),
+        "hr" => html_element(cx, el, child_views, leptos::html::hr(cx)),
+        "li" => html_element(cx, el, child_views, leptos::html::li(cx)),
+        "ol" => html_element(cx, el, child_views, leptos::html::ol(cx)),
+        "p" => html_element(cx, el, child_views, leptos::html::p(cx)),
+        "pre" => html_element(cx, el, child_views, leptos::html::pre(cx)),
+        "ul" => html_element(cx, el, child_views, leptos::html::ul(cx)),
+        "a" => html_element(cx, el, child_views, leptos::html::a(cx)),
+        "abbr" => html_element(cx, el, child_views, leptos::html::abbr(cx)),
+        "b" => html_element(cx, el, child_views, leptos::html::b(cx)),
+        "bdi" => html_element(cx, el, child_views, leptos::html::bdi(cx)),
+        "bdo" => html_element(cx, el, child_views, leptos::html::bdo(cx)),
+        "br" => html_element(cx, el, child_views, leptos::html::br(cx)),
+        "cite" => html_element(cx, el, child_views, leptos::html::cite(cx)),
+        "code" => html_element(cx, el, child_views, leptos::html::code(cx)),
+        "data" => html_element(cx, el, child_views, leptos::html::data(cx)),
+        "dfn" => html_element(cx, el, child_views, leptos::html::dfn(cx)),
+        "em" => html_element(cx, el, child_views, leptos::html::em(cx)),
+        "i" => html_element(cx, el, child_views, leptos::html::i(cx)),
+        "kbd" => html_element(cx, el, child_views, leptos::html::kbd(cx)),
+        "mark" => html_element(cx, el, child_views, leptos::html::mark(cx)),
+        "q" => html_element(cx, el, child_views, leptos::html::q(cx)),
+        "rp" => html_element(cx, el, child_views, leptos::html::rp(cx)),
+        "rt" => html_element(cx, el, child_views, leptos::html::rt(cx)),
+        "ruby" => html_element(cx, el, child_views, leptos::html::ruby(cx)),
+        "s" => html_element(cx, el, child_views, leptos::html::s(cx)),
+        "samp" => html_element(cx, el, child_views, leptos::html::samp(cx)),
+        "small" => html_element(cx, el, child_views, leptos::html::small(cx)),
+        "span" => html_element(cx, el, child_views, leptos::html::span(cx)),
+        "strong" => html_element(cx, el, child_views, leptos::html::strong(cx)),
+        "sub" => html_element(cx, el, child_views, leptos::html::sub(cx)),
+        "sup" => html_element(cx, el, child_views, leptos::html::sup(cx)),
+        "time" => html_element(cx, el, child_views, leptos::html::time(cx)),
+        "u" => html_element(cx, el, child_views, leptos::html::u(cx)),
+        "var" => html_element(cx, el, child_views, leptos::html::var(cx)),
+        "wbr" => html_element(cx, el, child_views, leptos::html::wbr(cx)),
+        "area" => html_element(cx, el, child_views, leptos::html::area(cx)),
+        "audio" => html_element(cx, el, child_views, leptos::html::audio(cx)),
+        "img" => html_element(cx, el, child_views, leptos::html::img(cx)),
+        "map" => html_element(cx, el, child_views, leptos::html::map(cx)),
+        "track" => html_element(cx, el, child_views, leptos::html::track(cx)),
+        "video" => html_element(cx, el, child_views, leptos::html::video(cx)),
+        "embed" => html_element(cx, el, child_views, leptos::html::embed(cx)),
+        "iframe" => html_element(cx, el, child_views, leptos::html::iframe(cx)),
+        "object" => html_element(cx, el, child_views, leptos::html::object(cx)),
+        "param" => html_element(cx, el, child_views, leptos::html::param(cx)),
+        "picture" => html_element(cx, el, child_views, leptos::html::picture(cx)),
+        "portal" => html_element(cx, el, child_views, leptos::html::portal(cx)),
+        "source" => html_element(cx, el, child_views, leptos::html::source(cx)),
+        "svg" => html_element(cx, el, child_views, leptos::html::svg(cx)),
+        "math" => html_element(cx, el, child_views, leptos::html::math(cx)),
+        "canvas" => html_element(cx, el, child_views, leptos::html::canvas(cx)),
+        "noscript" => html_element(cx, el, child_views, leptos::html::noscript(cx)),
+        "script" => html_element(cx, el, child_views, leptos::html::script(cx)),
+        "del" => html_element(cx, el, child_views, leptos::html::del(cx)),
+        "ins" => html_element(cx, el, child_views, leptos::html::ins(cx)),
+        "caption" => html_element(cx, el, child_views, leptos::html::caption(cx)),
+        "col" => html_element(cx, el, child_views, leptos::html::col(cx)),
+        "colgroup" => html_element(cx, el, child_views, leptos::html::colgroup(cx)),
+        "table" => html_element(cx, el, child_views, leptos::html::table(cx)),
+        "tbody" => html_element(cx, el, child_views, leptos::html::tbody(cx)),
+        "td" => html_element(cx, el, child_views, leptos::html::td(cx)),
+        "tfoot" => html_element(cx, el, child_views, leptos::html::tfoot(cx)),
+        "th" => html_element(cx, el, child_views, leptos::html::th(cx)),
+        "thead" => html_element(cx, el, child_views, leptos::html::thead(cx)),
+        "tr" => html_element(cx, el, child_views, leptos::html::tr(cx)),
+        "button" => html_element(cx, el, child_views, leptos::html::button(cx)),
+        "datalist" => html_element(cx, el, child_views, leptos::html::datalist(cx)),
+        "fieldset" => html_element(cx, el, child_views, leptos::html::fieldset(cx)),
+        "form" => html_element(cx, el, child_views, leptos::html::form(cx)),
+        "input" => html_element(cx, el, child_views, leptos::html::input(cx)),
+        "label" => html_element(cx, el, child_views, leptos::html::label(cx)),
+        "legend" => html_element(cx, el, child_views, leptos::html::legend(cx)),
+        "meter" => html_element(cx, el, child_views, leptos::html::meter(cx)),
+        "optgroup" => html_element(cx, el, child_views, leptos::html::optgroup(cx)),
+        "option" => html_element(cx, el, child_views, leptos::html::option(cx)),
+        "output" => html_element(cx, el, child_views, leptos::html::output(cx)),
+        "progress" => html_element(cx, el, child_views, leptos::html::progress(cx)),
+        "select" => html_element(cx, el, child_views, leptos::html::select(cx)),
+        "textarea" => html_element(cx, el, child_views, leptos::html::textarea(cx)),
+        "details" => html_element(cx, el, child_views, leptos::html::details(cx)),
+        "dialog" => html_element(cx, el, child_views, leptos::html::dialog(cx)),
+        "menu" => html_element(cx, el, child_views, leptos::html::menu(cx)),
+        "summary" => html_element(cx, el, child_views, leptos::html::summary(cx)),
+        "slot" => html_element(cx, el, child_views, leptos::html::slot(cx)),
+        "template" => html_element(cx, el, child_views, leptos::html::template(cx)),
         _ => {
             warn!("unknown element {}", el.name);
-            ().into_view()
+            ().into_view(cx)
         }
     }
 }
 
 fn html_element<Element>(
+    cx: Scope,
     element: &html_parser::Element,
     children: Vec<View>,
     mut leptos_el: HtmlElement<Element>,
@@ -254,5 +259,5 @@ where
         leptos_el = leptos_el.child(child);
     }
 
-    leptos_el.into_view()
+    leptos_el.into_view(cx)
 }
